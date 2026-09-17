@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum TripStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CarpoolStatus {
+  PENDING
+  MATCHED
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  preferences      UserPreference?
+  trips            Trip[]
+  carpoolRequests  CarpoolRequest[]
+  carpoolMatches   CarpoolMatch[]   @relation("CarpoolMatchUser")
+  carbonRecords    CarbonRecord[]
+  aiConversations  AIConversation[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model UserPreference {
+  id                     String  @id @default(cuid())
+  userId                 String  @unique @map("user_id")
+  preferredTransport     String? @map("preferred_transport")
+  maxWalkingDistanceM    Int?    @map("max_walking_distance_m")
+  maxBudget              Float?  @map("max_budget")
+  sustainabilityPriority Int     @default(50) @map("sustainability_priority")
+  timePriority           Int     @default(50) @map("time_priority")
+  accessibilityNeeds     Json?   @map("accessibility_needs")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model TransportMode {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  co2GramsPerKm   Float    @map("co2_grams_per_km")
+  avgCostPerKm    Float    @map("avg_cost_per_km")
+  avgSpeedKmh     Float    @map("avg_speed_kmh")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  routeOptions RouteOption[]
+
+  @@map("transport_modes")
+}
+
+model Trip {
+  id          String     @id @default(cuid())
+  userId      String     @map("user_id")
+  routeId     String?    @map("route_id")
+  status      TripStatus @default(PLANNED)
+  startedAt   DateTime?  @map("started_at")
+  completedAt DateTime?  @map("completed_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route         Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  carbonRecords CarbonRecord[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("trips")
+}
+
+model Route {
+  id            String   @id @default(cuid())
+  sourceLat     Float    @map("source_lat")
+  sourceLng     Float    @map("source_lng")
+  sourceLabel   String   @map("source_label")
+  destLat       Float    @map("dest_lat")
+  destLng       Float    @map("dest_lng")
+  destLabel     String   @map("dest_label")
+  departureTime DateTime @map("departure_time")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  options RouteOption[]
+  trips   Trip[]
+
+  @@index([createdAt])
+  @@map("routes")
+}
+
+model RouteOption {
+  id                String   @id @default(cuid())
+  routeId           String   @map("route_id")
+  transportModeId   String   @map("transport_mode_id")
+  durationMinutes   Int      @map("duration_minutes")
+  distanceKm        Float    @map("distance_km")
+  estimatedCost     Float    @map("estimated_cost")
+  estimatedCo2Grams Float    @map("estimated_co2_grams")
+  walkingMinutes    Int      @default(0) @map("walking_minutes")
+  reliabilityScore  Float    @default(0.8) @map("reliability_score")
+  compositeScore    Float?   @map("composite_score")
+  isRecommended     Boolean  @default(false) @map("is_recommended")
+  metadata          Json?
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  route         Route         @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  transportMode TransportMode @relation(fields: [transportModeId], references: [id])
+
+  @@index([routeId])
+  @@map("route_options")
+}
+
+model CarpoolRequest {
+  id              String        @id @default(cuid())
+  userId          String        @map("user_id")
+  originLat       Float         @map("origin_lat")
+  originLng       Float         @map("origin_lng")
+  originLabel     String        @map("origin_label")
+  destLat         Float         @map("dest_lat")
+  destLng         Float         @map("dest_lng")
+  destLabel       String        @map("dest_label")
+  departureTime   DateTime      @map("departure_time")
+  availableSeats  Int           @default(1) @map("available_seats")
+  maxDetourKm     Float         @default(2) @map("max_detour_km")
+  status          CarpoolStatus @default(PENDING)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matches CarpoolMatch[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("carpool_requests")
+}
+
+model CarpoolMatch {
+  id                String        @id @default(cuid())
+  requestId         String        @map("request_id")
+  matchedUserId     String        @map("matched_user_id")
+  compatibilityScore Float        @map("compatibility_score")
+  detourKm          Float         @map("detour_km")
+  status            CarpoolStatus @default(PENDING)
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  request     CarpoolRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  matchedUser User           @relation("CarpoolMatchUser", fields: [matchedUserId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([matchedUserId])
+  @@map("carpool_matches")
+}
+
+model CarbonRecord {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  tripId      String?  @map("trip_id")
+  co2Grams    Float    @map("co2_grams")
+  co2SavedGrams Float  @default(0) @map("co2_saved_grams")
+  recordedAt  DateTime @default(now()) @map("recorded_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip? @relation(fields: [tripId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([recordedAt])
+  @@map("carbon_records")
+}
+
+model Simulation {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  parameters  Json
+  results     Json
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("simulations")
+}
+
+model AIConversation {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  query     String
+  response  String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("ai_conversations")
+}
